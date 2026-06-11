@@ -45,6 +45,18 @@ rsvpnano/
 └── README.md
 ```
 
+## GitHub Pages
+
+The web flasher and Wi-Fi companion are published to GitHub Pages when enabled.
+
+**Note:** GitHub Pages on **private** repositories requires GitHub Pro/Team. On the free plan, either:
+
+- Make the repository **public** (recommended for `foliveross.github.io/rsvpnano`), or
+- Upgrade the account, or
+- Use the Windows desktop app / local `web/` folder.
+
+Enable Pages: Repository **Settings → Pages → Build and deployment → GitHub Actions**.
+
 ## License
 
 MIT — same as upstream. See [LICENSE](LICENSE).
