@@ -83,11 +83,11 @@ class CompanionSyncManager {
   void handleOtaCheck();
   void handleOptions();
   void handleNotFound();
-  void applyCorsHeaders() const;
+  void applyCorsHeaders();
   bool validatePairingCode(const String &body) const;
   String wirelessJson() const;
   String storageJson() const;
-  String statsJson() const;
+  String statsJson();
   int cleanupSidecarFiles() const;
   String settingsJson();
   bool applySettingsJson(const String &body, String &error);

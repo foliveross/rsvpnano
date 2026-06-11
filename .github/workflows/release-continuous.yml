@@ -53,7 +53,9 @@ jobs:
           java-version: "17"
 
       - name: Build APK
-        run: ./gradlew :app:assembleRelease --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon
         working-directory: android
 
       - name: Stage APK
