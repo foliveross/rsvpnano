@@ -843,7 +843,7 @@ void CompanionSyncManager::stopServer() {
   serverStarted_ = false;
 }
 
-void CompanionSyncManager::applyCorsHeaders() const {
+void CompanionSyncManager::applyCorsHeaders() {
   server_.sendHeader("Access-Control-Allow-Origin", "*");
   server_.sendHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   server_.sendHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -1883,7 +1883,7 @@ String CompanionSyncManager::storageJson() const {
          ",\"articleCount\":" + String(countDir(kArticleFilesPath)) + "}";
 }
 
-String CompanionSyncManager::statsJson() const {
+String CompanionSyncManager::statsJson() {
   const uint32_t wordsToday = preferences_.getUInt(kPrefWordsReadToday, 0);
   const String wordsDate = preferences_.getString(kPrefWordsReadDate, "");
   const uint16_t wpm = preferences_.getUShort(kPrefWpm, kDefaultWpm);
