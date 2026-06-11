@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RSVP Nano Wireless Companion</title>
+<style>
+:root{color-scheme:dark;--bg:#0c1110;--fg:#f5f1e8;--muted:#a7aaa0;--line:#2d3430;--card:#151b18;--accent:#78d5b1;--accentInk:#07110e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif;padding:16px}
+h1{font-size:1.2rem;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select,textarea,button{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:#111714;color:var(--fg)}
+button.primary{background:var(--accent);color:var(--accentInk);border-color:var(--accent);font-weight:600;cursor:pointer}
+button.danger{color:#ff9b73;cursor:pointer}
+.muted{color:var(--muted)}.status{padding:10px;background:#1d2924;border-radius:8px;margin-bottom:12px}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button{cursor:pointer}.tabs button.active{background:var(--fg);color:var(--bg)}
+.page{display:none}.page.active{display:block}
+.item{border-top:1px solid var(--line);padding:8px 0}
+</style>
+</head>
+<body>
+<h1>Wireless companion</h1>
+<div id="status" class="status">Enter device URL and connect.</div>
+
+<div class="card">
+  <label>Device URL</label>
+  <div class="row">
+    <input id="baseUrl" style="flex:1;min-width:200px" placeholder="http://192.168.4.1 or http://rsvp-nano.local" value="http://192.168.4.1">
+    <button class="primary" id="connectBtn">Connect</button>
+  </div>
+  <p class="muted">Open Companion sync on the reader, join RSVP-Nano Wi-Fi, or use home network (STA mode).</p>
+</div>
+
+<div id="devicePanel" style="display:none">
+  <div class="card" id="infoBox"></div>
+  <div class="row tabs">
+    <button type="button" data-tab="books" class="active">Books</button>
+    <button type="button" data-tab="wireless">Wireless</button>
+    <button type="button" data-tab="storage">Storage</button>
+    <button type="button" data-tab="settings">Settings</button>
+  </div>
+
+  <section id="books" class="page active">
+    <div class="card">
+      <h2>Upload</h2>
+      <input type="file" id="bookFile" accept=".rsvp,.txt,.epub">
+      <button class="primary" id="uploadBtn">Upload book</button>
+    </div>
+    <div class="card"><h2>Library</h2><div id="booksList"></div></div>
+  </section>
+
+  <section id="wireless" class="page">
+    <div class="card">
+      <h2>Wireless control</h2>
+      <p>Pairing code: <strong id="pairingCode">—</strong></p>
+      <label>Companion mode</label>
+      <select id="wirelessMode"><option value="ap">Access point</option><option value="sta">Home Wi-Fi (STA)</option><option value="auto">Auto</option></select>
+      <label>Auto-timeout (minutes, 0 = off)</label>
+      <input id="timeoutMin" type="number" min="0" max="120" value="0">
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="applyWirelessBtn">Apply wireless settings</button>
+        <button class="danger" id="stopWirelessBtn">Stop wireless</button>
+      </div>
+    </div>
+    <div class="card"><pre id="wirelessStatus" class="muted"></pre></div>
+  </section>
+
+  <section id="storage" class="page">
+    <div class="card">
+      <button class="primary" id="cleanupBtn">Clean sidecars</button>
+      <button id="refreshLibBtn">Refresh library on device</button>
+      <button id="otaCheckBtn">Check OTA update</button>
+    </div>
+    <div class="card"><pre id="storageInfo" class="muted"></pre></div>
+    <div class="card"><pre id="statsInfo" class="muted"></pre></div>
+    <div class="card"><pre id="otaInfo" class="muted"></pre></div>
+  </section>
+
+  <section id="settings" class="page">
+    <div class="card">
+      <label>Home Wi-Fi SSID</label><input id="wifiSsid">
+      <label>Password</label><input id="wifiPass" type="password">
+      <div class="row"><button class="primary" id="saveWifiBtn">Save Wi-Fi</button><button id="forgetWifiBtn">Forget</button></div>
+      <label>RSS feeds (one per line)</label>
+      <textarea id="rssFeeds" rows="6"></textarea>
+      <button class="primary" id="saveRssBtn">Save RSS</button>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let base = '';
+let pairingCode = '';
+
+function status(msg) { $('status').textContent = msg; }
+
+async function api(path, opts = {}) {
+  const url = base.replace(/\/$/, '') + path;
+  const r = await fetch(url, opts);
+  const t = await r.text();
+  let j = {};
+  try { j = t ? JSON.parse(t) : {}; } catch { throw new Error(t || 'Bad response'); }
+  if (!r.ok || j.ok === false) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function connect() {
+  base = $('baseUrl').value.trim();
+  if (!base) return status('Enter a URL');
+  try {
+    const info = await api('/api/info');
+    pairingCode = info.pairingCode;
+    $('pairingCode').textContent = pairingCode;
+    $('infoBox').innerHTML = `<strong>${info.name}</strong><br><span class="muted">${info.mode} · ${info.networkSsid || ''} · ${info.firmwareVersion || ''}</span><br>IP: ${info.ip || ''}`;
+    $('devicePanel').style.display = 'block';
+    await loadBooks();
+    await loadWireless();
+    status('Connected.');
+  } catch (e) { status('Connection failed: ' + e.message); }
+}
+
+function renderBooks(books) {
+  const items = books.filter(b => b.category !== 'article' && !String(b.name).startsWith('articles/'));
+  $('booksList').innerHTML = items.length ? items.map(b => `<div class="item"><strong>${b.title || b.name}</strong><br><span class="muted">${b.name} · ${b.bytes} B</span> <button class="danger" data-del="${encodeURIComponent(b.name)}">Delete</button></div>`).join('') : '<span class="muted">No books</span>';
+  document.querySelectorAll('[data-del]').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Delete?')) return;
+    await api('/api/books?name=' + btn.dataset.del, { method: 'DELETE' });
+    await loadBooks();
+  });
+}
+
+async function loadBooks() {
+  const data = await api('/api/books');
+  renderBooks(data.books || []);
+}
+
+async function loadWireless() {
+  try {
+    const w = await api('/api/wireless');
+    $('wirelessStatus').textContent = JSON.stringify(w, null, 2);
+  } catch { $('wirelessStatus').textContent = 'Wireless API not available (flash fork firmware).'; }
+}
+
+async function loadStoragePanel() {
+  try {
+    $('storageInfo').textContent = JSON.stringify(await api('/api/storage'), null, 2);
+    $('statsInfo').textContent = JSON.stringify(await api('/api/stats'), null, 2);
+  } catch (e) { $('storageInfo').textContent = e.message; }
+}
+
+$('connectBtn').onclick = connect;
+$('uploadBtn').onclick = async () => {
+  const f = $('bookFile').files[0];
+  if (!f) return status('Pick a file');
+  const fd = new FormData();
+  fd.append('file', f, f.name);
+  await api('/api/books?name=' + encodeURIComponent(f.name) + '&category=book', { method: 'POST', body: fd });
+  await loadBooks();
+  status('Uploaded ' + f.name);
+};
+$('applyWirelessBtn').onclick = async () => {
+  await api('/api/wireless', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pairingCode,
+      mode: $('wirelessMode').value,
+      companionTimeoutMin: +$('timeoutMin').value
+    })
+  });
+  await loadWireless();
+  status('Wireless settings saved.');
+};
+$('stopWirelessBtn').onclick = async () => {
+  await api('/api/wireless', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pairingCode })
+  });
+  status('Wireless stop requested. Device will exit companion mode.');
+};
+$('cleanupBtn').onclick = async () => {
+  const r = await api('/api/storage/cleanup', { method: 'POST' });
+  status('Removed ' + r.removed + ' sidecar files.');
+  await loadStoragePanel();
+};
+$('refreshLibBtn').onclick = async () => {
+  await api('/api/library/refresh', { method: 'POST' });
+  status('Library refresh requested on device.');
+};
+$('otaCheckBtn').onclick = async () => {
+  $('otaInfo').textContent = JSON.stringify(await api('/api/ota/check', { method: 'POST' }), null, 2);
+};
+$('saveWifiBtn').onclick = async () => {
+  await api('/api/wifi', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ssid: $('wifiSsid').value, password: $('wifiPass').value })
+  });
+  status('Wi-Fi saved on device.');
+};
+$('forgetWifiBtn').onclick = async () => {
+  await api('/api/wifi', { method: 'DELETE' });
+  status('Wi-Fi cleared.');
+};
+$('saveRssBtn').onclick = async () => {
+  const feeds = $('rssFeeds').value.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  await api('/api/rss-feeds', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ feeds })
+  });
+  status('RSS feeds saved.');
+};
+
+document.querySelectorAll('.tabs button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.tabs button,.page').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById(b.dataset.tab).classList.add('active');
+    if (b.dataset.tab === 'storage') loadStoragePanel();
+    if (b.dataset.tab === 'settings') {
+      api('/api/wifi').then(w => { $('wifiSsid').value = w.ssid || ''; });
+      api('/api/rss-feeds').then(r => { $('rssFeeds').value = (r.feeds || []).join('\n'); });
+    }
+  };
+});
+</script>
+</body>
+</html>

@@ -3,6 +3,7 @@
 #include <ESPmDNS.h>
 #include <SD_MMC.h>
 #include <WiFi.h>
+#include <update/OtaUpdater.h>
 #include <algorithm>
 #include <cstdio>
 #include <vector>
@@ -47,6 +48,13 @@ constexpr const char *kPrefTypographyGuideWidth = "type_wid";
 constexpr const char *kPrefTypographyGuideGap = "type_gap";
 constexpr const char *kPrefWifiSsid = "wifi_ssid";
 constexpr const char *kPrefWifiPass = "wifi_pass";
+constexpr const char *kPrefCompanionMode = "comp_mode";
+constexpr const char *kPrefCompanionTimeoutMin = "comp_tout";
+constexpr const char *kPrefCompanionOnBoot = "comp_boot";
+constexpr const char *kPrefWordsReadToday = "words_today";
+constexpr const char *kPrefWordsReadDate = "words_date";
+constexpr uint32_t kStationConnectTimeoutMs = 15000;
+constexpr const char *kSidecarSuffixes[] = {".rsvp.tmp", ".rsvp.converting", ".rsvp.failed"};
 constexpr uint16_t kDefaultWpm = 300;
 constexpr uint16_t kMinWpm = 10;
 constexpr uint16_t kMaxWpm = 1000;
@@ -522,18 +530,24 @@ String rsvpMetadataValueFromLine(const String &line, const char *directive, bool
 CompanionSyncManager *CompanionSyncManager::instance_ = nullptr;
 
 bool CompanionSyncManager::begin(const Config &config) {
-  (void)config;
   if (active_) {
     return true;
   }
 
   instance_ = this;
+  shutdownRequested_ = false;
+  libraryRefreshRequested_ = false;
   pairingCode_ = String(static_cast<uint32_t>(esp_random()) % 900000UL + 100000UL);
   statusLine1_ = "Starting sync";
   statusLine2_ = "Preparing Wi-Fi";
   preferences_.begin(kPrefsNamespace, false);
 
-  const bool networkReady = startAccessPoint();
+  if (!config.wifiSsid.isEmpty()) {
+    preferences_.putString(kPrefWifiSsid, config.wifiSsid);
+    preferences_.putString(kPrefWifiPass, config.wifiPassword);
+  }
+
+  const bool networkReady = startNetwork(config.beginMode);
   if (!networkReady) {
     statusLine1_ = "Wi-Fi failed";
     statusLine2_ = "";
@@ -549,6 +563,7 @@ bool CompanionSyncManager::begin(const Config &config) {
   }
 
   active_ = true;
+  lastActivityMs_ = millis();
   statusLine1_ = networkSsid_;
   statusLine2_ = baseUrl();
   Serial.printf("[sync] ready ssid=%s url=%s pairing=%s\n", networkSsid_.c_str(), baseUrl().c_str(),
@@ -561,6 +576,11 @@ void CompanionSyncManager::update() {
     return;
   }
   server_.handleClient();
+
+  const uint16_t timeoutMin = preferences_.getUShort(kPrefCompanionTimeoutMin, 0);
+  if (timeoutMin > 0 && millis() - lastActivityMs_ > static_cast<uint32_t>(timeoutMin) * 60000UL) {
+    shutdownRequested_ = true;
+  }
 }
 
 void CompanionSyncManager::end() {
@@ -582,6 +602,14 @@ void CompanionSyncManager::end() {
 }
 
 bool CompanionSyncManager::active() const { return active_; }
+
+bool CompanionSyncManager::shutdownRequested() const { return shutdownRequested_; }
+
+void CompanionSyncManager::clearShutdownRequest() { shutdownRequested_ = false; }
+
+bool CompanionSyncManager::libraryRefreshRequested() const { return libraryRefreshRequested_; }
+
+void CompanionSyncManager::clearLibraryRefreshRequest() { libraryRefreshRequested_ = false; }
 
 String CompanionSyncManager::statusLine1() const { return statusLine1_; }
 
@@ -651,6 +679,48 @@ void CompanionSyncManager::handleBookUploadStatic() {
   }
 }
 
+void CompanionSyncManager::handleWirelessStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleWireless();
+  }
+}
+
+void CompanionSyncManager::handleStorageStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleStorage();
+  }
+}
+
+void CompanionSyncManager::handleStorageCleanupStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleStorageCleanup();
+  }
+}
+
+void CompanionSyncManager::handleLibraryRefreshStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleLibraryRefresh();
+  }
+}
+
+void CompanionSyncManager::handleStatsStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleStats();
+  }
+}
+
+void CompanionSyncManager::handleOtaCheckStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleOtaCheck();
+  }
+}
+
+void CompanionSyncManager::handleOptionsStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleOptions();
+  }
+}
+
 void CompanionSyncManager::handleNotFoundStatic() {
   if (instance_ != nullptr) {
     instance_->handleNotFound();
@@ -669,8 +739,56 @@ bool CompanionSyncManager::startAccessPoint() {
   }
 
   networkMode_ = NetworkMode::AccessPoint;
+  preferences_.putUChar(kPrefCompanionMode, static_cast<uint8_t>(BeginMode::AccessPoint));
   Serial.printf("[sync] softAP ssid=%s ip=%s\n", ssid.c_str(), ipToString(WiFi.softAPIP()).c_str());
   return true;
+}
+
+bool CompanionSyncManager::startStation() {
+  const String ssid = preferences_.getString(kPrefWifiSsid, "");
+  const String pass = preferences_.getString(kPrefWifiPass, "");
+  if (ssid.isEmpty()) {
+    Serial.println("[sync] station mode: no saved Wi-Fi");
+    return false;
+  }
+
+  statusLine1_ = "Connecting";
+  statusLine2_ = ssid;
+  networkSsid_ = ssid;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  const uint32_t startMs = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startMs < kStationConnectTimeoutMs) {
+    delay(100);
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[sync] station connect failed");
+    WiFi.disconnect(true, false);
+    return false;
+  }
+
+  networkMode_ = NetworkMode::Station;
+  preferences_.putUChar(kPrefCompanionMode, static_cast<uint8_t>(BeginMode::Station));
+  statusLine1_ = ssid;
+  statusLine2_ = ipToString(WiFi.localIP());
+  Serial.printf("[sync] station ssid=%s ip=%s\n", ssid.c_str(), statusLine2_.c_str());
+  return true;
+}
+
+bool CompanionSyncManager::startNetwork(BeginMode mode) {
+  if (mode == BeginMode::Station) {
+    return startStation();
+  }
+  if (mode == BeginMode::Auto) {
+    if (startStation()) {
+      return true;
+    }
+    Serial.println("[sync] auto mode falling back to AP");
+    return startAccessPoint();
+  }
+  return startAccessPoint();
 }
 
 bool CompanionSyncManager::startServer() {
@@ -687,6 +805,25 @@ bool CompanionSyncManager::startServer() {
   server_.on("/api/wifi", HTTP_DELETE, handleWifiStatic);
   server_.on("/api/rss-feeds", HTTP_GET, handleRssFeedsStatic);
   server_.on("/api/rss-feeds", HTTP_PUT, handleRssFeedsStatic);
+  server_.on("/api/wireless", HTTP_GET, handleWirelessStatic);
+  server_.on("/api/wireless", HTTP_POST, handleWirelessStatic);
+  server_.on("/api/wireless", HTTP_DELETE, handleWirelessStatic);
+  server_.on("/api/storage", HTTP_GET, handleStorageStatic);
+  server_.on("/api/storage/cleanup", HTTP_POST, handleStorageCleanupStatic);
+  server_.on("/api/library/refresh", HTTP_POST, handleLibraryRefreshStatic);
+  server_.on("/api/stats", HTTP_GET, handleStatsStatic);
+  server_.on("/api/ota/check", HTTP_POST, handleOtaCheckStatic);
+  server_.on("/api/info", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/books", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/settings", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/wifi", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/rss-feeds", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/wireless", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/storage", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/storage/cleanup", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/library/refresh", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/stats", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/ota/check", HTTP_OPTIONS, handleOptionsStatic);
   server_.onNotFound(handleNotFoundStatic);
   server_.begin();
   serverStarted_ = true;
@@ -706,23 +843,45 @@ void CompanionSyncManager::stopServer() {
   serverStarted_ = false;
 }
 
+void CompanionSyncManager::applyCorsHeaders() const {
+  server_.sendHeader("Access-Control-Allow-Origin", "*");
+  server_.sendHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  server_.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+void CompanionSyncManager::handleOptions() {
+  applyCorsHeaders();
+  server_.send(204);
+}
+
 void CompanionSyncManager::handleInfo() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
   const String mode = networkMode_ == NetworkMode::Station ? "station" : "access_point";
+  const String ip =
+      networkMode_ == NetworkMode::Station ? ipToString(WiFi.localIP()) : ipToString(WiFi.softAPIP());
+  OtaUpdater updater;
   const String body = String("{") + "\"name\":\"RSVP Nano\"," +
                       "\"mode\":\"" + mode + "\"," +
                       "\"baseUrl\":\"" + jsonEscape(baseUrl()) + "\"," +
                       "\"networkSsid\":\"" + jsonEscape(networkSsid_) + "\"," +
                       "\"pairingCode\":\"" + pairingCode_ + "\"," +
-                      "\"uploadPath\":\"/api/books\"" + "}";
+                      "\"uploadPath\":\"/api/books\"," +
+                      "\"wirelessActive\":" + String(active_ ? "true" : "false") + "," +
+                      "\"ip\":\"" + ip + "\"," +
+                      "\"firmwareVersion\":\"" + jsonEscape(updater.currentVersion()) + "\"," +
+                      "\"fork\":\"foliveross\"" + "}";
   server_.send(200, "application/json", body);
 }
 
 void CompanionSyncManager::handleRoot() {
+  applyCorsHeaders();
   server_.sendHeader("Cache-Control", "no-store, max-age=0");
   server_.send_P(200, "text/html", kWebCompanionHtml);
 }
 
 void CompanionSyncManager::handleBooksList() {
+  applyCorsHeaders();
   String body = "{\"books\":[";
   bool first = true;
 
@@ -777,6 +936,7 @@ void CompanionSyncManager::handleBooksList() {
 }
 
 void CompanionSyncManager::handleSettings() {
+  applyCorsHeaders();
   if (server_.method() == HTTP_GET) {
     server_.send(200, "application/json", settingsJson());
     return;
@@ -799,6 +959,7 @@ void CompanionSyncManager::handleSettings() {
 }
 
 void CompanionSyncManager::handleWifi() {
+  applyCorsHeaders();
   if (server_.method() == HTTP_GET) {
     server_.send(200, "application/json", wifiJson());
     return;
@@ -826,6 +987,7 @@ void CompanionSyncManager::handleWifi() {
 }
 
 void CompanionSyncManager::handleRssFeeds() {
+  applyCorsHeaders();
   if (server_.method() == HTTP_GET) {
     server_.send(200, "application/json", rssFeedsJson());
     return;
@@ -844,6 +1006,7 @@ void CompanionSyncManager::handleRssFeeds() {
 }
 
 void CompanionSyncManager::handleBooks() {
+  applyCorsHeaders();
   finishUpload(uploadError_.isEmpty());
   if (!uploadError_.isEmpty()) {
     server_.send(400, "application/json",
@@ -858,6 +1021,63 @@ void CompanionSyncManager::handleBooks() {
 }
 
 void CompanionSyncManager::handleBookDelete() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
+  const String body = server_.arg("plain");
+  if (body.length() > 2 && body.indexOf("\"names\"") >= 0) {
+    std::vector<String> names;
+    size_t pos = 0;
+    while (true) {
+      const int q1 = body.indexOf('"', pos);
+      if (q1 < 0) {
+        break;
+      }
+      const int q2 = body.indexOf('"', q1 + 1);
+      if (q2 < 0) {
+        break;
+      }
+      const String token = body.substring(q1 + 1, q2);
+      if (token.indexOf('/') >= 0 || token.endsWith(".rsvp") || token.endsWith(".txt") ||
+          token.endsWith(".epub")) {
+        names.push_back(token);
+      }
+      pos = q2 + 1;
+    }
+    if (names.empty()) {
+      server_.send(400, "application/json", "{\"ok\":false,\"error\":\"No valid names in batch\"}");
+      return;
+    }
+    int deleted = 0;
+    for (const String &name : names) {
+      String requested = name;
+      requested.trim();
+      if (requested.isEmpty()) {
+        continue;
+      }
+      String filename = requested;
+      String path;
+      const int separator = requested.indexOf('/');
+      if (separator >= 0) {
+        const String directory = requested.substring(0, separator);
+        filename = sanitizeFilename(requested.substring(separator + 1));
+        if (filename.isEmpty() || requested.indexOf("..") >= 0 ||
+            (directory != "books" && directory != "articles")) {
+          continue;
+        }
+        path = String(kBooksPath) + "/" + directory + "/" + filename;
+      } else {
+        filename = sanitizeFilename(requested);
+        path = String(kBooksPath) + "/" + filename;
+      }
+      if (SD_MMC.remove(path)) {
+        deleted++;
+      }
+    }
+    server_.send(200, "application/json",
+                 String("{\"ok\":true,\"deleted\":") + String(deleted) + "}");
+    return;
+  }
+
   String requested = server_.arg("name");
   requested.trim();
   if (requested.isEmpty()) {
@@ -989,6 +1209,7 @@ void CompanionSyncManager::handleBookUpload() {
 }
 
 void CompanionSyncManager::handleNotFound() {
+  applyCorsHeaders();
   server_.send(404, "application/json", "{\"ok\":false,\"error\":\"Not found\"}");
 }
 
@@ -1594,6 +1815,228 @@ uint32_t CompanionSyncManager::hashBookPath(const String &path) const {
     hash *= 16777619UL;
   }
   return hash;
+}
+
+bool CompanionSyncManager::validatePairingCode(const String &body) const {
+  if (body.isEmpty()) {
+    return false;
+  }
+  const int idx = body.indexOf("\"pairingCode\"");
+  if (idx < 0) {
+    return false;
+  }
+  const int colon = body.indexOf(':', idx);
+  const int q1 = body.indexOf('"', colon + 1);
+  const int q2 = body.indexOf('"', q1 + 1);
+  if (colon < 0 || q1 < 0 || q2 < 0) {
+    return false;
+  }
+  return body.substring(q1 + 1, q2) == pairingCode_;
+}
+
+String CompanionSyncManager::wirelessJson() const {
+  const String mode =
+      networkMode_ == NetworkMode::Station ? "sta" : networkMode_ == NetworkMode::AccessPoint ? "ap" : "off";
+  const String ip =
+      networkMode_ == NetworkMode::Station ? ipToString(WiFi.localIP()) : ipToString(WiFi.softAPIP());
+  return String("{\"ok\":true,\"active\":") + (active_ ? "true" : "false") +
+         ",\"mode\":\"" + mode + "\",\"ssid\":\"" + jsonEscape(networkSsid_) +
+         "\",\"url\":\"" + jsonEscape(baseUrl()) + "\",\"ip\":\"" + ip +
+         "\",\"pairingCode\":\"" + pairingCode_ + "\"}";
+}
+
+String CompanionSyncManager::storageJson() const {
+  const bool mounted = SD_MMC.cardType() != CARD_NONE;
+  uint64_t totalBytes = 0;
+  uint64_t usedBytes = 0;
+  if (mounted) {
+    totalBytes = SD_MMC.totalBytes();
+    usedBytes = SD_MMC.usedBytes();
+  }
+
+  const auto countDir = [](const char *path) -> int {
+    int count = 0;
+    File dir = SD_MMC.open(path);
+    if (!dir || !dir.isDirectory()) {
+      if (dir) {
+        dir.close();
+      }
+      return 0;
+    }
+    File entry = dir.openNextFile();
+    while (entry) {
+      if (!entry.isDirectory()) {
+        count++;
+      }
+      entry.close();
+      entry = dir.openNextFile();
+    }
+    dir.close();
+    return count;
+  };
+
+  return String("{\"ok\":true,\"mounted\":") + (mounted ? "true" : "false") +
+         ",\"totalBytes\":" + String(static_cast<uint64_t>(totalBytes)) +
+         ",\"usedBytes\":" + String(static_cast<uint64_t>(usedBytes)) +
+         ",\"booksFolder\":\"" + jsonEscape(kBookFilesPath) + "\",\"articlesFolder\":\"" +
+         jsonEscape(kArticleFilesPath) + "\",\"bookCount\":" + String(countDir(kBookFilesPath)) +
+         ",\"articleCount\":" + String(countDir(kArticleFilesPath)) + "}";
+}
+
+String CompanionSyncManager::statsJson() const {
+  const uint32_t wordsToday = preferences_.getUInt(kPrefWordsReadToday, 0);
+  const String wordsDate = preferences_.getString(kPrefWordsReadDate, "");
+  const uint16_t wpm = preferences_.getUShort(kPrefWpm, kDefaultWpm);
+  return String("{\"ok\":true,\"wordsReadToday\":") + String(wordsToday) +
+         ",\"wordsDate\":\"" + jsonEscape(wordsDate) + "\",\"currentWpm\":" + String(wpm) + "}";
+}
+
+int CompanionSyncManager::cleanupSidecarFiles() const {
+  int removed = 0;
+  const auto cleanDir = [&](const char *directoryPath) {
+    File dir = SD_MMC.open(directoryPath);
+    if (!dir || !dir.isDirectory()) {
+      if (dir) {
+        dir.close();
+      }
+      return;
+    }
+    File entry = dir.openNextFile();
+    while (entry) {
+      if (!entry.isDirectory()) {
+        const String name = String(entry.name());
+        entry.close();
+        String lowered = name;
+        lowered.toLowerCase();
+        bool isSidecar = false;
+        for (const char *suffix : kSidecarSuffixes) {
+          if (lowered.endsWith(suffix)) {
+            isSidecar = true;
+            break;
+          }
+        }
+        if (isSidecar) {
+          const String path = String(directoryPath) + "/" + name;
+          if (SD_MMC.remove(path)) {
+            removed++;
+          }
+        }
+      } else {
+        entry.close();
+      }
+      entry = dir.openNextFile();
+    }
+    dir.close();
+  };
+
+  cleanDir(kBooksPath);
+  cleanDir(kBookFilesPath);
+  cleanDir(kArticleFilesPath);
+  return removed;
+}
+
+void CompanionSyncManager::handleWireless() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
+  if (server_.method() == HTTP_GET) {
+    server_.send(200, "application/json", wirelessJson());
+    return;
+  }
+
+  const String body = server_.arg("plain");
+  if (server_.method() == HTTP_DELETE) {
+    if (!validatePairingCode(body)) {
+      server_.send(403, "application/json", "{\"ok\":false,\"error\":\"Invalid pairing code\"}");
+      return;
+    }
+    shutdownRequested_ = true;
+    server_.send(200, "application/json", "{\"ok\":true,\"active\":false}");
+    return;
+  }
+
+  if (server_.method() == HTTP_POST) {
+    if (!validatePairingCode(body)) {
+      server_.send(403, "application/json", "{\"ok\":false,\"error\":\"Invalid pairing code\"}");
+      return;
+    }
+
+    BeginMode requested = BeginMode::AccessPoint;
+    if (body.indexOf("\"sta\"") >= 0 || body.indexOf("\"station\"") >= 0) {
+      requested = BeginMode::Station;
+    } else if (body.indexOf("\"auto\"") >= 0) {
+      requested = BeginMode::Auto;
+    } else if (body.indexOf("\"ap\"") >= 0 || body.indexOf("\"access_point\"") >= 0) {
+      requested = BeginMode::AccessPoint;
+    }
+
+    preferences_.putUChar(kPrefCompanionMode, static_cast<uint8_t>(requested));
+
+    if (body.indexOf("\"companionTimeoutMin\"") >= 0) {
+      int val = 0;
+      const int idx = body.indexOf("\"companionTimeoutMin\"");
+      const int colon = body.indexOf(':', idx);
+      if (colon >= 0) {
+        val = body.substring(colon + 1).toInt();
+      }
+      preferences_.putUShort(kPrefCompanionTimeoutMin, static_cast<uint16_t>(std::max(0, val)));
+    }
+
+    server_.send(200, "application/json", wirelessJson());
+  }
+}
+
+void CompanionSyncManager::handleStorage() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
+  server_.send(200, "application/json", storageJson());
+}
+
+void CompanionSyncManager::handleStorageCleanup() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
+  const int removed = cleanupSidecarFiles();
+  server_.send(200, "application/json",
+               String("{\"ok\":true,\"removed\":") + String(removed) + "}");
+}
+
+void CompanionSyncManager::handleLibraryRefresh() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
+  libraryRefreshRequested_ = true;
+  server_.send(200, "application/json", "{\"ok\":true}");
+}
+
+void CompanionSyncManager::handleStats() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
+  server_.send(200, "application/json", statsJson());
+}
+
+void CompanionSyncManager::handleOtaCheck() {
+  applyCorsHeaders();
+  lastActivityMs_ = millis();
+  OtaUpdater updater;
+  OtaUpdater::Config otaConfig;
+  otaConfig.wifiSsid = preferences_.getString(kPrefWifiSsid, "");
+  otaConfig.wifiPassword = preferences_.getString(kPrefWifiPass, "");
+  otaConfig.githubOwner = "foliveross";
+  otaConfig.githubRepo = "rsvpnano";
+
+  if (!updater.isConfigured(otaConfig)) {
+    server_.send(200, "application/json",
+                 String("{\"ok\":true,\"configured\":false,\"currentVersion\":\"") +
+                     jsonEscape(updater.currentVersion()) + "\"}");
+    return;
+  }
+
+  const OtaUpdater::Result result = updater.checkOnly(otaConfig);
+  const bool updateAvailable = result.code == OtaUpdater::ResultCode::UpdateAvailable;
+  server_.send(200, "application/json",
+               String("{\"ok\":true,\"configured\":true,\"currentVersion\":\"") +
+                   jsonEscape(result.currentVersion) + "\",\"latestVersion\":\"" +
+                   jsonEscape(result.latestVersion) + "\",\"updateAvailable\":" +
+                   (updateAvailable ? "true" : "false") + ",\"summary\":\"" +
+                   jsonEscape(result.summary) + "\"}");
 }
 
 void CompanionSyncManager::finishUpload(bool success) {

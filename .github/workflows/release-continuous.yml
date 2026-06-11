@@ -1,0 +1,162 @@
+name: Build release and deploy Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release-pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version_tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set build version
+        id: version
+        run: echo "tag=build-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build and export firmware
+        env:
+          RSVP_FIRMWARE_VERSION: 0.1.0-build.${{ github.run_number }}
+        run: |
+          python3 tools/export_web_firmware.py --version "build-${{ github.run_number }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-web
+          path: web/
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build APK
+        run: ./gradlew :app:assembleRelease --no-daemon
+        working-directory: android
+
+      - name: Stage APK
+        run: |
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          cp "$APK" rsvpnano-companion-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: rsvpnano-companion-android.apk
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build companion-core
+        run: npm install && npm run build
+        working-directory: companion-core
+
+      - name: Build Electron portable
+        run: npm install && npm run build
+        working-directory: desktop
+
+      - name: Stage EXE
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path desktop/dist -Filter "*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "EXE not found" }
+          Copy-Item $exe.FullName RSVPnano-Companion-portable.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: RSVPnano-Companion-portable.exe
+
+  release:
+    needs: [build-firmware, build-android, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-web
+          path: web
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: release-assets
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: release-assets
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: build-${{ github.run_number }}
+        run: |
+          cat > release-notes.md <<EOF
+          Continuous build from commit ${{ github.sha }}.
+
+          - **RSVPnano-Companion-portable.exe** — Windows app (flasher + converter + Wi-Fi companion)
+          - **rsvpnano-companion-android.apk** — Android companion app
+          - **rsvp-nano.bin** / **rsvp-nano-ota.bin** — firmware for USB flasher and OTA
+          EOF
+          gh release create "$TAG" \
+            --title "Build ${{ github.run_number }}" \
+            --notes-file release-notes.md \
+            --prerelease \
+            web/firmware/rsvp-nano.bin \
+            web/firmware/rsvp-nano-ota.bin \
+            release-assets/rsvpnano-companion-android.apk \
+            release-assets/RSVPnano-Companion-portable.exe
+
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-web
+          path: web
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

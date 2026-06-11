@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RSVP Nano Companion</title>
+    <link rel="stylesheet" href="/public/shell.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>RSVP Nano</h1>
+      <nav class="tabs">
+        <button type="button" data-tab="flasher" class="active">Install firmware</button>
+        <button type="button" data-tab="library">Book converter</button>
+        <button type="button" data-tab="companion">Wireless companion</button>
+      </nav>
+    </header>
+    <main>
+      <section id="panel-flasher" class="panel active">
+        <iframe src="/web/index.html" title="Firmware flasher"></iframe>
+      </section>
+      <section id="panel-library" class="panel">
+        <iframe src="/web/index.html#library" title="Book converter"></iframe>
+      </section>
+      <section id="panel-companion" class="panel">
+        <iframe src="/public/companion.html" title="Wireless companion"></iframe>
+      </section>
+    </main>
+    <script src="/public/shell.js"></script>
+  </body>
+</html>

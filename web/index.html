@@ -10,6 +10,7 @@
     ></script>
     <script type="module" src="./library.js"></script>
     <script type="module" src="./components/install-firmware.js"></script>
+    <script type="module" src="./components/companion-sync.js"></script>
     <style>
       :root {
         --ink: #1d1711;
@@ -760,11 +761,105 @@
       .compat-dismiss:hover {
         background: var(--accent-deep);
       }
+
+      .site-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+
+      .site-nav a {
+        padding: 8px 16px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 250, 241, 0.9);
+        color: var(--ink);
+        text-decoration: none;
+        font: 600 0.88rem/1 ui-sans-serif, system-ui, sans-serif;
+      }
+
+      .site-nav a:hover {
+        border-color: var(--accent);
+      }
+
+      .download-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+
+      .download-card {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 250, 241, 0.72);
+      }
+
+      .companion-shell {
+        display: grid;
+        gap: 14px;
+      }
+
+      .companion-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .companion-row input,
+      .companion-row select,
+      .companion-row textarea {
+        flex: 1;
+        min-width: 200px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        font: inherit;
+      }
+
+      .companion-item {
+        border-top: 1px solid var(--line);
+        padding: 10px 0;
+      }
+
+      .companion-danger {
+        color: var(--accent-deep);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      #companion-status {
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: rgba(132, 47, 32, 0.08);
+        font-size: 0.95rem;
+      }
+
+      #companion-wireless-json {
+        white-space: pre-wrap;
+        font: 0.82rem/1.45 ui-monospace, monospace;
+        background: rgba(29, 23, 17, 0.06);
+        padding: 12px;
+        border-radius: 12px;
+        max-height: 200px;
+        overflow: auto;
+      }
     </style>
   </head>
   <body>
     <main>
-      <section class="hero">
+      <nav class="site-nav" aria-label="Sections">
+        <a href="#flash-section">USB firmware</a>
+        <a href="#sdcard-section">SD card &amp; converter</a>
+        <a href="#companion-section">Wi-Fi companion</a>
+        <a href="#downloads-section">Downloads</a>
+      </nav>
+
+      <section class="hero" id="flash-section">
         <div class="card intro">
           <p class="eyebrow">Browser firmware installer</p>
           <h1>RSVP Nano</h1>
@@ -968,8 +1063,115 @@
         </div>
       </section>
 
+      <section class="card step-card" id="companion-section">
+        <button
+          class="step-card-toggle"
+          id="companion-toggle"
+          type="button"
+          aria-expanded="true"
+          aria-controls="companion-content"
+        >
+          <span class="section-header-main">
+            <span class="step-number">4</span>
+            <span class="section-header-label">
+              <span class="section-kicker">Wireless Companion</span>
+              <span class="section-title">Wi-Fi sync &amp; uploads</span>
+            </span>
+          </span>
+          <span class="section-summary">Connect over RSVP-Nano Wi-Fi or home LAN</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <div class="section-body section-body-single" id="companion-content">
+          <div class="companion-shell">
+            <p>
+              Open <code>Companion sync</code> on the reader, join the <code>RSVP-Nano-xxxxxx</code> network
+              (or use <code>http://rsvp-nano.local</code> on your home Wi-Fi), then connect below.
+              Works from <strong>Windows, Android, and desktop browsers</strong> with fork firmware
+              <code>v0.1.0+</code> (CORS enabled).
+            </p>
+            <div id="companion-status">Enter device URL and connect.</div>
+            <div class="companion-row">
+              <input id="companion-base-url" type="url" placeholder="http://192.168.4.1" value="http://192.168.4.1" />
+              <button class="tool-button tool-button-primary" id="companion-connect-btn" type="button">Connect</button>
+            </div>
+            <div id="companion-connected" hidden>
+              <div id="companion-info" class="meta-card"></div>
+              <p>Pairing code: <strong id="companion-pairing-code">—</strong></p>
+              <h3>Upload book</h3>
+              <div class="companion-row">
+                <input id="companion-book-file" type="file" accept=".rsvp,.txt,.epub" />
+                <button class="tool-button tool-button-primary" id="companion-upload-btn" type="button">Upload</button>
+                <button class="tool-button" id="companion-cleanup-btn" type="button">Clean sidecars</button>
+              </div>
+              <div id="companion-books-list"></div>
+              <h3>Article</h3>
+              <input id="companion-article-title" placeholder="Title" />
+              <input id="companion-article-author" placeholder="Author or source" />
+              <textarea id="companion-article-body" rows="5" placeholder="Paste article text"></textarea>
+              <button class="tool-button tool-button-primary" id="companion-sync-article-btn" type="button">Sync article</button>
+              <h3>Wireless control</h3>
+              <div class="companion-row">
+                <select id="companion-wireless-mode">
+                  <option value="ap">Access point</option>
+                  <option value="sta">Home Wi-Fi (STA)</option>
+                  <option value="auto">Auto</option>
+                </select>
+                <input id="companion-timeout" type="number" min="0" max="120" value="0" placeholder="Timeout min" />
+                <button class="tool-button" id="companion-apply-wireless-btn" type="button">Apply</button>
+                <button class="tool-button" id="companion-stop-wireless-btn" type="button">Stop wireless</button>
+              </div>
+              <pre id="companion-wireless-json"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card step-card" id="downloads-section">
+        <button
+          class="step-card-toggle"
+          id="downloads-toggle"
+          type="button"
+          aria-expanded="true"
+          aria-controls="downloads-content"
+        >
+          <span class="section-header-main">
+            <span class="step-number">5</span>
+            <span class="section-header-label">
+              <span class="section-kicker">Native apps</span>
+              <span class="section-title">Windows &amp; Android</span>
+            </span>
+          </span>
+          <span class="section-summary">Latest release builds</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <div class="section-body section-body-single" id="downloads-content">
+          <p class="inline-note">
+            Each push to <code>main</code> publishes a new release with Windows portable EXE and Android APK.
+            USB firmware install still works in this page (Chrome/Edge on Windows, Linux, ChromeOS).
+            On Android, use Wi-Fi companion below; Web Serial is not available on mobile.
+          </p>
+          <div class="download-grid">
+            <div class="download-card">
+              <strong>Windows companion</strong>
+              <p>Flasher, converter, and wireless companion in one app.</p>
+              <a class="tool-button tool-button-primary" id="download-windows" href="https://github.com/foliveross/rsvpnano/releases/latest/download/RSVPNano-Companion-portable.exe">Download EXE</a>
+            </div>
+            <div class="download-card">
+              <strong>Android companion</strong>
+              <p>Upload books, wireless control, share-to-article.</p>
+              <a class="tool-button tool-button-primary" id="download-android" href="https://github.com/foliveross/rsvpnano/releases/latest/download/rsvpnano-companion-android.apk">Download APK</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <footer>
-        RSVP Nano is open source. Build it, modify it, improve it, and share what you make.
+        RSVP Nano fork by foliveross. Upstream:
+        <a href="https://github.com/ionutdecebal/rsvpnano">ionutdecebal/rsvpnano</a>.
       </footer>
       <div class="compat-overlay" id="compat-modal" hidden>
         <div class="compat-modal">
@@ -1022,6 +1224,12 @@
 
       initSectionToggle("sdcard-section", false);
       initSectionToggle("workspace-section", false);
+      initSectionToggle("companion-section", false);
+      initSectionToggle("downloads-section", false);
+    </script>
+    <script type="module">
+      import { initCompanionSync } from "./components/companion-sync.js";
+      initCompanionSync();
     </script>
   </body>
 </html>

@@ -4038,6 +4038,8 @@ void App::enterCompanionSync(uint32_t nowMs) {
   CompanionSyncManager::Config syncConfig;
   syncConfig.wifiSsid = wifiConfig.wifiSsid;
   syncConfig.wifiPassword = wifiConfig.wifiPassword;
+  const uint8_t compMode = std::min(preferences_.getUChar("comp_mode", 0), static_cast<uint8_t>(2));
+  syncConfig.beginMode = static_cast<CompanionSyncManager::BeginMode>(compMode);
 
   if (!companionSync_.begin(syncConfig)) {
     Serial.println("[app] companion sync failed");
@@ -4054,6 +4056,16 @@ void App::enterCompanionSync(uint32_t nowMs) {
 
 void App::updateCompanionSync(uint32_t nowMs) {
   companionSync_.update();
+
+  if (companionSync_.shutdownRequested()) {
+    exitCompanionSync(nowMs);
+    return;
+  }
+
+  if (companionSync_.libraryRefreshRequested()) {
+    companionSync_.clearLibraryRefreshRequest();
+    storage_.refreshBooks();
+  }
 
   if (powerButton_.isHeld() && nowMs - powerButton_.lastEdgeMs() >= kUsbTransferExitHoldMs) {
     powerButtonLongPressHandled_ = true;

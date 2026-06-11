@@ -1,0 +1,50 @@
+{
+  "name": "rsvpnano-desktop",
+  "version": "0.1.0",
+  "description": "RSVP Nano Windows companion (flasher + converter + wireless)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.foliveross.rsvpnano",
+    "productName": "RSVPNano Companion",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "local-server.js",
+      "preload.js",
+      "public/**/*",
+      "icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../web",
+        "to": "web",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../companion-core/dist",
+        "to": "companion-core",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "RSVPNano-Companion-${version}-portable.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}

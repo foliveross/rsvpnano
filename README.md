@@ -1,8 +1,29 @@
-# RSVP Nano
+# RSVP Nano (foliveross fork)
+
+Enhanced fork of [ionutdecebal/rsvpnano](https://github.com/ionutdecebal/rsvpnano) with Windows desktop companion, Android app, and extended wireless API. See [FORK.md](FORK.md) for differences.
+
+## Monorepo quick start
+
+| Component | Command |
+|-----------|---------|
+| Windows desktop | `scripts\dev-desktop.bat` |
+| Build Windows EXE | `scripts\build-exe.bat` |
+| Build Android APK | `scripts\build-android.bat` |
+| Build firmware | `scripts\build-firmware.bat` |
+
+Firmware release: `v0.1.0-foliveross`. OTA and releases target `foliveross/rsvpnano`.
+
+**Web:** https://foliveross.github.io/rsvpnano/ (USB flasher, book converter, Wi-Fi companion)
+
+**Releases:** each push to `main` publishes Windows EXE + Android APK + firmware binaries.
+
+---
+
+# RSVP Nano (upstream documentation)
 
 RSVP Nano is an open-source ESP32-S3 reading device that shows text one word at a time using RSVP, Rapid Serial Visual Presentation. It is designed for small screens, SD card libraries, fast reading, and a simple browser-first workflow for converting and uploading books.
 
-This README is written for the current release, `v0.0.5`.
+This README is written for the current release, `v0.1.0-foliveross` (fork; upstream base `v0.0.5`).
 
 ## What You Need
 

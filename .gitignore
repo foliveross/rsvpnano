@@ -20,3 +20,11 @@ tools/*.rsvp
 web/firmware/*.bin
 .cache/
 compile_commands.json
+node_modules/
+companion-core/node_modules/
+desktop/node_modules/
+desktop/dist/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

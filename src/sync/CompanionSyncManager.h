@@ -7,15 +7,26 @@
 
 class CompanionSyncManager {
  public:
+  enum class BeginMode : uint8_t {
+    AccessPoint = 0,
+    Station = 1,
+    Auto = 2,
+  };
+
   struct Config {
     String wifiSsid;
     String wifiPassword;
+    BeginMode beginMode = BeginMode::AccessPoint;
   };
 
   bool begin(const Config &config);
   void update();
   void end();
   bool active() const;
+  bool shutdownRequested() const;
+  void clearShutdownRequest();
+  bool libraryRefreshRequested() const;
+  void clearLibraryRefreshRequest();
   String statusLine1() const;
   String statusLine2() const;
   String baseUrl() const;
@@ -41,9 +52,18 @@ class CompanionSyncManager {
   static void handleBookDeleteStatic();
   static void handleBooksStatic();
   static void handleBookUploadStatic();
+  static void handleWirelessStatic();
+  static void handleStorageStatic();
+  static void handleStorageCleanupStatic();
+  static void handleLibraryRefreshStatic();
+  static void handleStatsStatic();
+  static void handleOtaCheckStatic();
+  static void handleOptionsStatic();
   static void handleNotFoundStatic();
 
   bool startAccessPoint();
+  bool startStation();
+  bool startNetwork(BeginMode mode);
   bool startServer();
   void stopServer();
   void handleInfo();
@@ -55,7 +75,20 @@ class CompanionSyncManager {
   void handleBookDelete();
   void handleBooks();
   void handleBookUpload();
+  void handleWireless();
+  void handleStorage();
+  void handleStorageCleanup();
+  void handleLibraryRefresh();
+  void handleStats();
+  void handleOtaCheck();
+  void handleOptions();
   void handleNotFound();
+  void applyCorsHeaders() const;
+  bool validatePairingCode(const String &body) const;
+  String wirelessJson() const;
+  String storageJson() const;
+  String statsJson() const;
+  int cleanupSidecarFiles() const;
   String settingsJson();
   bool applySettingsJson(const String &body, String &error);
   String wifiJson();
@@ -87,4 +120,7 @@ class CompanionSyncManager {
   NetworkMode networkMode_ = NetworkMode::None;
   bool active_ = false;
   bool serverStarted_ = false;
+  bool shutdownRequested_ = false;
+  bool libraryRefreshRequested_ = false;
+  uint32_t lastActivityMs_ = 0;
 };
