@@ -142,7 +142,6 @@ jobs:
   pages:
     needs: release
     runs-on: ubuntu-latest
-    continue-on-error: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

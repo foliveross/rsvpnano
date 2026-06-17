@@ -1,0 +1,7 @@
+FROM node:20-alpine
+WORKDIR /app
+COPY web ./public
+RUN npm install -g serve@14.2.4
+ENV PORT=3000
+EXPOSE 3000
+CMD ["sh", "-c", "serve public -l ${PORT} --no-clipboard"]

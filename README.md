@@ -2,6 +2,19 @@
 
 Enhanced fork of [ionutdecebal/rsvpnano](https://github.com/ionutdecebal/rsvpnano) with Windows desktop companion, Android app, and extended wireless API. See [FORK.md](FORK.md) for differences.
 
+## Try it online (any device)
+
+**Web app (GitHub Pages):** [https://foliveross.github.io/rsvpnano/](https://foliveross.github.io/rsvpnano/)
+
+| Feature | Desktop (Chrome/Edge) | Android / iPhone |
+|---------|----------------------|------------------|
+| Install / update firmware via USB | Yes | No (Web Serial not supported on mobile) |
+| Convert EPUB/TXT/MD/HTML → `.rsvp` | Yes | Yes |
+| Wi-Fi companion (upload books, settings, wireless toggle) | Yes | Yes — join `RSVP-Nano-*` Wi-Fi or use home LAN (`rsvp-nano.local`) |
+| Download native app | [Windows EXE](https://github.com/foliveross/rsvpnano/releases/latest/download/RSVPnano-Companion-portable.exe) | [Android APK](https://github.com/foliveross/rsvpnano/releases/latest/download/rsvpnano-companion-android.apk) |
+
+Each push to `main` publishes a new [GitHub Release](https://github.com/foliveross/rsvpnano/releases) with firmware binaries, Windows EXE, and Android APK.
+
 ## Monorepo quick start
 
 | Component | Command |
@@ -13,9 +26,7 @@ Enhanced fork of [ionutdecebal/rsvpnano](https://github.com/ionutdecebal/rsvpnan
 
 Firmware release: `v0.1.0-foliveross`. OTA and releases target `foliveross/rsvpnano`.
 
-**Web:** https://foliveross.github.io/rsvpnano/ (USB flasher, book converter, Wi-Fi companion)
-
-**Releases:** each push to `main` publishes Windows EXE + Android APK + firmware binaries.
+**Live web:** [https://foliveross.github.io/rsvpnano/](https://foliveross.github.io/rsvpnano/)
 
 ---
 
