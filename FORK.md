@@ -47,15 +47,13 @@ rsvpnano/
 
 ## GitHub Pages
 
-The web flasher and Wi-Fi companion are published to GitHub Pages when enabled.
+**Live demo:** [https://foliveross.github.io/rsvpnano/](https://foliveross.github.io/rsvpnano/)
 
-**Note:** GitHub Pages on **private** repositories requires GitHub Pro/Team. On the free plan, either:
+Includes USB firmware installer (Chrome/Edge desktop), book converter, Wi-Fi companion, and download links for Windows EXE and Android APK.
 
-- Make the repository **public** (recommended for `foliveross.github.io/rsvpnano`), or
-- Upgrade the account, or
-- Use the Windows desktop app / local `web/` folder.
+The repository is **public** so GitHub Pages works on the free plan. Enable in **Settings → Pages → GitHub Actions** if redeploying manually.
 
-Enable Pages: Repository **Settings → Pages → Build and deployment → GitHub Actions**.
+Optional Railway static host: use `Dockerfile.web` and `railway.web.json` (`railway up` with Dockerfile path).
 
 ## License
 
